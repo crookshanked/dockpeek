@@ -85,7 +85,7 @@ class UpdateChecker:
     
     def _resolve_floating_tag(self, current_tag: str, labels: dict = None) -> str:
         if labels and 'dockpeek.update-tag' in labels:
-            return labels['dockpeek.update-tag']
+            return labels['dockpeek.update-tag'] or 'latest'
 
         if self._floating_tag_mode == 'disabled' or current_tag == 'latest':
             return current_tag
