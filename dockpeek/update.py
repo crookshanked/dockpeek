@@ -83,7 +83,10 @@ class UpdateChecker:
         self._executor = ThreadPoolExecutor(max_workers=2)
         self._floating_tag_mode = os.getenv('UPDATE_FLOATING_TAGS', 'disabled').lower()
     
-    def _resolve_floating_tag(self, current_tag: str) -> str:
+    def _resolve_floating_tag(self, current_tag: str, labels: dict = None) -> str:
+        if labels and 'dockpeek.update-tag' in labels:
+            return labels['dockpeek.update-tag']
+
         if self._floating_tag_mode == 'disabled' or current_tag == 'latest':
             return current_tag
 
@@ -151,9 +154,11 @@ class UpdateChecker:
             image_name = container.attrs.get('Config', {}).get('Image', '')
             if not image_name: 
                 return False
+
+            labels = container.attrs.get('Config', {}).get('Labels', {}) or {}
                 
             base_name, current_tag = self._parse_image_name(image_name)
-            resolved_tag = self._resolve_floating_tag(current_tag)
+            resolved_tag = self._resolve_floating_tag(current_tag, labels)
                 
             try:
                 local_image = client.images.get(f"{base_name}:{resolved_tag}")
@@ -184,8 +189,10 @@ class UpdateChecker:
                 logger.info(f"Using cached update result for {server_name}:{container.name}")
                 return cached_result
             
+            labels = container.attrs.get('Config', {}).get('Labels', {}) or {}
+
             base_name, current_tag = self._parse_image_name(image_name)
-            resolved_tag = self._resolve_floating_tag(current_tag)
+            resolved_tag = self._resolve_floating_tag(current_tag, labels)
 
             if resolved_tag != current_tag:
                 logger.info(f"[{server_name}] Checking floating tag: {current_tag} → {resolved_tag}")
