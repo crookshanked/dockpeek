@@ -144,16 +144,16 @@ class UpdateChecker:
 
     def check_local_image_updates(self, client, container, server_name):
         if self._cancellation.is_cancelled():
-            return False
+            return {"available": False, "version": None}
             
         try:
             container_image_id = container.attrs.get('Image', '')
             if not container_image_id: 
-                return False
+                return {"available": False, "version": None}
                 
             image_name = container.attrs.get('Config', {}).get('Image', '')
             if not image_name: 
-                return False
+                return {"available": False, "version": None}
 
             labels = container.attrs.get('Config', {}).get('Labels', {}) or {}
                 
@@ -162,26 +162,27 @@ class UpdateChecker:
                 
             try:
                 local_image = client.images.get(f"{base_name}:{resolved_tag}")
-                return container_image_id != local_image.id
+                available = container_image_id != local_image.id
+                return {"available": available, "version": resolved_tag if available else None}
             except Exception: 
-                return False
+                return {"available": False, "version": None}
         except Exception as e:
             logger.error(f"Error checking local image updates for container '{container.name}': {e}")
-            return False
+            return {"available": False, "version": None}
     
     def check_image_updates(self, client, container, server_name):
         if self._cancellation.is_cancelled():
             logger.debug(f"Update check cancelled before starting for {container.name}")
-            return False
+            return {"available": False, "version": None}
             
         try:
             container_image_id = container.attrs.get('Image', '')
             if not container_image_id: 
-                return False
+                return {"available": False, "version": None}
                 
             image_name = container.attrs.get('Config', {}).get('Image', '')
             if not image_name: 
-                return False
+                return {"available": False, "version": None}
                 
             cache_key = self.get_cache_key(server_name, container.name, image_name)
             cached_result, is_valid = self.get_cached_result(cache_key)
@@ -199,16 +200,17 @@ class UpdateChecker:
             
             if self._cancellation.is_cancelled():
                 logger.info(f"Update check cancelled before pulling {base_name}:{current_tag} on {server_name}")
-                return False
+                return {"available": False, "version": None}
             
-            result = self._pull_and_compare(client, container_image_id, base_name, resolved_tag, server_name)
+            is_update_available = self._pull_and_compare(client, container_image_id, base_name, resolved_tag, server_name)
+            result = {"available": is_update_available, "version": resolved_tag if is_update_available else None}
             self.set_cache_result(cache_key, result)
             return result
                 
         except Exception as e:
             if not self._cancellation.is_cancelled():
                 logger.error(f"Error checking image updates for '{container.name}' on {server_name}: {e}")
-            return False
+            return {"available": False, "version": None}
 
     def _parse_image_name(self, image_name):
         if ':' in image_name: 
