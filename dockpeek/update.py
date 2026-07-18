@@ -163,7 +163,8 @@ class UpdateChecker:
             try:
                 local_image = client.images.get(f"{base_name}:{resolved_tag}")
                 available = container_image_id != local_image.id
-                return {"available": available, "version": resolved_tag if available else None}
+                update_version = self._extract_image_version(local_image, resolved_tag) if available else None
+                return {"available": available, "version": update_version}
             except Exception: 
                 return {"available": False, "version": None}
         except Exception as e:
@@ -202,8 +203,7 @@ class UpdateChecker:
                 logger.info(f"Update check cancelled before pulling {base_name}:{current_tag} on {server_name}")
                 return {"available": False, "version": None}
             
-            is_update_available = self._pull_and_compare(client, container_image_id, base_name, resolved_tag, server_name)
-            result = {"available": is_update_available, "version": resolved_tag if is_update_available else None}
+            result = self._pull_and_compare(client, container_image_id, base_name, resolved_tag, server_name)
             self.set_cache_result(cache_key, result)
             return result
                 
@@ -211,6 +211,28 @@ class UpdateChecker:
             if not self._cancellation.is_cancelled():
                 logger.error(f"Error checking image updates for '{container.name}' on {server_name}: {e}")
             return {"available": False, "version": None}
+
+    def _extract_image_version(self, image_obj, default_tag):
+        labels = image_obj.labels or {}
+        for key in ['org.opencontainers.image.version', 'version', 'build_version']:
+            if key in labels and labels[key]:
+                # In some images like linuxserver, build_version might be verbose:
+                # 'Linuxserver.io version:- 4.0.19.2979-ls320 Build-date:- 2026-07-18T00:16:13+00:00'
+                # Let's just return the label value directly unless it's too long, but org.opencontainers.image.version is clean.
+                # Prioritize 'org.opencontainers.image.version'
+                if key == 'org.opencontainers.image.version':
+                    return labels[key]
+                elif 'version:-' in labels[key]:
+                    return labels[key].split('version:-')[1].strip().split(' ')[0].strip()
+                return labels[key]
+
+        for env in image_obj.attrs.get('Config', {}).get('Env', []):
+            if '=' in env:
+                k, v = env.split('=', 1)
+                if 'VERSION' in k and v:
+                    return v
+
+        return default_tag
 
     def _parse_image_name(self, image_name):
         if ':' in image_name: 
@@ -242,11 +264,13 @@ class UpdateChecker:
             updated_image = client.images.get(f"{base_name}:{current_tag}")
             result = container_image_id != updated_image.id
             
+            update_version = self._extract_image_version(updated_image, current_tag) if result else None
+
             if result:
                 logger.info(
                     f"\033[96m[{server_name}]\033[0m "
                     f"\033[93mUpdate available\033[0m  "
-                    f"\033[0m{base_name}:\033[96m{current_tag}\033[0m "
+                    f"\033[0m{base_name}:\033[96m{update_version}\033[0m "
                 )
             else:
                 logger.info(
@@ -255,7 +279,7 @@ class UpdateChecker:
                     f"{base_name}:{current_tag}"
                 )
             
-            return result
+            return {"available": result, "version": update_version}
             
         except Exception as pull_error:
                 if self._cancellation.is_cancelled():
